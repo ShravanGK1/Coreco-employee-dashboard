@@ -1,59 +1,37 @@
 import { useState, useEffect, useContext, useReducer, useRef, useMemo, useCallback, useLayoutEffect, createContext } from "react";
+import { createClient } from "@supabase/supabase-js";
+
+// ─── SUPABASE CLIENT ───────────────────────────────────────────────────────
+const SUPABASE_URL = "https://bblkrxjyfmqvupmctifa.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImJibGtyeGp5Zm1xdnVwbWN0aWZhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODI3MTA0NDEsImV4cCI6MjA5ODI4NjQ0MX0.ETP_1Pk-QtO2rxY-Djo5cSIBIzuHyaoJaRw6MgQCKnc";
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ─── CONTEXT ───────────────────────────────────────────────────────────────
 const AppContext = createContext();
 
 // ─── REDUCER ───────────────────────────────────────────────────────────────
-// ─── LOCALSTORAGE HELPERS ──────────────────────────────────────────────────
-const LS_KEY = "empdesk_employees";
-function loadFromStorage() {
-  try {
-    const raw = localStorage.getItem(LS_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch { return []; }
-}
-function saveToStorage(employees) {
-  try { localStorage.setItem(LS_KEY, JSON.stringify(employees)); } catch {}
-}
-
 const initialState = {
-  employees: loadFromStorage(),
+  employees: [],
   loading: false,
   error: null,
   editingEmployee: null,
 };
 
 function employeeReducer(state, action) {
-  let next;
   switch (action.type) {
-    case "SET_LOADING":
-      return { ...state, loading: action.payload };
-    case "SET_ERROR":
-      return { ...state, error: action.payload };
-    case "SET_EMPLOYEES":
-      next = { ...state, employees: action.payload, loading: false };
-      saveToStorage(action.payload);
-      return next;
-    case "ADD_EMPLOYEE":
-      next = { ...state, employees: [action.payload, ...state.employees] };
-      saveToStorage(next.employees);
-      return next;
+    case "SET_LOADING":    return { ...state, loading: action.payload };
+    case "SET_ERROR":      return { ...state, error: action.payload, loading: false };
+    case "SET_EMPLOYEES":  return { ...state, employees: action.payload, loading: false };
+    case "ADD_EMPLOYEE":   return { ...state, employees: [action.payload, ...state.employees] };
     case "UPDATE_EMPLOYEE":
-      next = {
+      return {
         ...state,
         employees: state.employees.map((e) => e.id === action.payload.id ? action.payload : e),
         editingEmployee: null,
       };
-      saveToStorage(next.employees);
-      return next;
-    case "DELETE_EMPLOYEE":
-      next = { ...state, employees: state.employees.filter((e) => e.id !== action.payload) };
-      saveToStorage(next.employees);
-      return next;
-    case "SET_EDITING":
-      return { ...state, editingEmployee: action.payload };
-    default:
-      return state;
+    case "DELETE_EMPLOYEE": return { ...state, employees: state.employees.filter((e) => e.id !== action.payload) };
+    case "SET_EDITING":    return { ...state, editingEmployee: action.payload };
+    default: return state;
   }
 }
 
@@ -81,45 +59,72 @@ const MOCK_EMPLOYEES = [
   { id:20, firstName:"Daniel",  lastName:"Lee",       email:"daniel.lee@corp.com",      phone:"555-0120", department:"Finance",     role:"CFO",                   status:"Active",   avatar:"" },
 ];
 
+// ─── SUPABASE CRUD HELPERS ─────────────────────────────────────────────────
+const db = {
+  async fetchAll() {
+    const { data, error } = await supabase
+      .from("employees")
+      .select("*")
+      .order("id", { ascending: false });
+    if (error) throw error;
+    return data;
+  },
+  async insert(emp) {
+    const { id, ...rest } = emp; // strip local id, let Supabase generate
+    const { data, error } = await supabase
+      .from("employees")
+      .insert([rest])
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async update(emp) {
+    const { data, error } = await supabase
+      .from("employees")
+      .update(emp)
+      .eq("id", emp.id)
+      .select()
+      .single();
+    if (error) throw error;
+    return data;
+  },
+  async remove(id) {
+    const { error } = await supabase
+      .from("employees")
+      .delete()
+      .eq("id", id);
+    if (error) throw error;
+  },
+  async seedIfEmpty(seeds) {
+    const { count } = await supabase
+      .from("employees")
+      .select("*", { count: "exact", head: true });
+    if (count === 0) {
+      const rows = seeds.map(({ id, ...rest }) => rest);
+      await supabase.from("employees").insert(rows);
+    }
+  },
+};
+
+// ─── CUSTOM HOOK: useFetchEmployees (Supabase) ─────────────────────────────
 function useFetchEmployees(dispatch) {
   const hasFetched = useRef(false);
   useEffect(() => {
     if (hasFetched.current) return;
     hasFetched.current = true;
-
-    // If localStorage already has employees, use them — skip fetch entirely
-    const saved = loadFromStorage();
-    if (saved.length > 0) {
-      dispatch({ type: "SET_EMPLOYEES", payload: saved });
-      return;
-    }
-
-    // No saved data — fetch from API for the first time
     dispatch({ type: "SET_LOADING", payload: true });
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-    fetch("https://dummyjson.com/users?limit=30", { signal: controller.signal })
-      .then((r) => { if (!r.ok) throw new Error("bad"); return r.json(); })
-      .then((data) => {
-        clearTimeout(timer);
-        const mapped = data.users.map((u) => ({
-          id: u.id,
-          firstName: u.firstName,
-          lastName: u.lastName,
-          email: u.email,
-          phone: u.phone,
-          department: u.company?.department || "General",
-          role: u.company?.title || "Employee",
-          age: u.age,
-          avatar: u.image,
-          status: u.id % 5 === 0 ? "Inactive" : "Active",
-        }));
-        dispatch({ type: "SET_EMPLOYEES", payload: mapped });
-      })
-      .catch(() => {
-        clearTimeout(timer);
-        dispatch({ type: "SET_EMPLOYEES", payload: MOCK_EMPLOYEES });
-      });
+    (async () => {
+      try {
+        // Seed table with mock data if it is empty (first ever load)
+        await db.seedIfEmpty(MOCK_EMPLOYEES);
+        const data = await db.fetchAll();
+        dispatch({ type: "SET_EMPLOYEES", payload: data });
+      } catch (err) {
+        console.error("Supabase fetch error:", err);
+        dispatch({ type: "SET_ERROR", payload: "Failed to connect to database." });
+      }
+    })();
   }, [dispatch]);
 }
 
@@ -549,14 +554,30 @@ function EmployeeModal({ onClose }) {
     clearErrors();
   }, [clearErrors]);
 
-  const handleSave = useCallback(() => {
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = useCallback(async () => {
     if (!validate()) return;
-    if (editing) {
-      dispatch({ type: "UPDATE_EMPLOYEE", payload: { ...form } });
-    } else {
-      dispatch({ type: "ADD_EMPLOYEE", payload: { ...form, id: Date.now(), avatar: `https://ui-avatars.com/api/?name=${form.firstName}+${form.lastName}&background=ede9fe&color=7c3aed` } });
+    setSaving(true);
+    try {
+      if (editing) {
+        const updated = await db.update({ ...form });
+        dispatch({ type: "UPDATE_EMPLOYEE", payload: updated });
+      } else {
+        const payload = {
+          ...form,
+          avatar: `https://ui-avatars.com/api/?name=${form.firstName}+${form.lastName}&background=ede9fe&color=7c3aed`,
+        };
+        const inserted = await db.insert(payload);
+        dispatch({ type: "ADD_EMPLOYEE", payload: inserted });
+      }
+      onClose();
+    } catch (err) {
+      console.error("Save error:", err);
+      alert("Failed to save employee. Please try again.");
+    } finally {
+      setSaving(false);
     }
-    onClose();
   }, [validate, editing, dispatch, form, onClose]);
 
   return (
@@ -589,7 +610,7 @@ function EmployeeModal({ onClose }) {
         </div>
         <div className="modal-footer">
           <button className="btn btn-ghost" onClick={onClose}>Cancel</button>
-          <button className="btn btn-primary" onClick={handleSave}>{editing ? "Save changes" : "Add employee"}</button>
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>{saving ? "Saving…" : editing ? "Save changes" : "Add employee"}</button>
         </div>
       </div>
     </div>
@@ -634,8 +655,14 @@ function Dashboard({ user, onLogout }) {
     setShowModal(true);
   }, [dispatch]);
 
-  const handleDelete = useCallback((id) => {
-    dispatch({ type: "DELETE_EMPLOYEE", payload: id });
+  const handleDelete = useCallback(async (id) => {
+    try {
+      await db.remove(id);
+      dispatch({ type: "DELETE_EMPLOYEE", payload: id });
+    } catch (err) {
+      console.error("Delete error:", err);
+      alert("Failed to delete employee. Please try again.");
+    }
     setDeleteId(null);
   }, [dispatch]);
 
