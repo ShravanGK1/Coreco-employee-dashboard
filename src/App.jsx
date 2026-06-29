@@ -32,8 +32,7 @@ function employeeReducer(state, action) {
       return { ...state, error: action.payload };
     case "SET_EMPLOYEES":
       next = { ...state, employees: action.payload, loading: false };
-      // Only persist to localStorage if no data existed before (initial API load)
-      if (loadFromStorage().length === 0) saveToStorage(action.payload);
+      saveToStorage(action.payload);
       return next;
     case "ADD_EMPLOYEE":
       next = { ...state, employees: [action.payload, ...state.employees] };
@@ -87,6 +86,15 @@ function useFetchEmployees(dispatch) {
   useEffect(() => {
     if (hasFetched.current) return;
     hasFetched.current = true;
+
+    // If localStorage already has employees, use them — skip fetch entirely
+    const saved = loadFromStorage();
+    if (saved.length > 0) {
+      dispatch({ type: "SET_EMPLOYEES", payload: saved });
+      return;
+    }
+
+    // No saved data — fetch from API for the first time
     dispatch({ type: "SET_LOADING", payload: true });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
