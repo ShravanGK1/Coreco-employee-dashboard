@@ -4,29 +4,57 @@ import { useState, useEffect, useContext, useReducer, useRef, useMemo, useCallba
 const AppContext = createContext();
 
 // ─── REDUCER ───────────────────────────────────────────────────────────────
+// ─── LOCALSTORAGE HELPERS ──────────────────────────────────────────────────
+const LS_KEY = "empdesk_employees";
+function loadFromStorage() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch { return []; }
+}
+function saveToStorage(employees) {
+  try { localStorage.setItem(LS_KEY, JSON.stringify(employees)); } catch {}
+}
+
 const initialState = {
-  employees: [],
+  employees: loadFromStorage(),
   loading: false,
   error: null,
   editingEmployee: null,
 };
 
 function employeeReducer(state, action) {
+  let next;
   switch (action.type) {
-    case "SET_LOADING": return { ...state, loading: action.payload };
-    case "SET_ERROR": return { ...state, error: action.payload };
-    case "SET_EMPLOYEES": return { ...state, employees: action.payload, loading: false };
-    case "ADD_EMPLOYEE": return { ...state, employees: [action.payload, ...state.employees] };
+    case "SET_LOADING":
+      return { ...state, loading: action.payload };
+    case "SET_ERROR":
+      return { ...state, error: action.payload };
+    case "SET_EMPLOYEES":
+      next = { ...state, employees: action.payload, loading: false };
+      // Only persist to localStorage if no data existed before (initial API load)
+      if (loadFromStorage().length === 0) saveToStorage(action.payload);
+      return next;
+    case "ADD_EMPLOYEE":
+      next = { ...state, employees: [action.payload, ...state.employees] };
+      saveToStorage(next.employees);
+      return next;
     case "UPDATE_EMPLOYEE":
-      return {
+      next = {
         ...state,
         employees: state.employees.map((e) => e.id === action.payload.id ? action.payload : e),
         editingEmployee: null,
       };
+      saveToStorage(next.employees);
+      return next;
     case "DELETE_EMPLOYEE":
-      return { ...state, employees: state.employees.filter((e) => e.id !== action.payload) };
-    case "SET_EDITING": return { ...state, editingEmployee: action.payload };
-    default: return state;
+      next = { ...state, employees: state.employees.filter((e) => e.id !== action.payload) };
+      saveToStorage(next.employees);
+      return next;
+    case "SET_EDITING":
+      return { ...state, editingEmployee: action.payload };
+    default:
+      return state;
   }
 }
 
@@ -340,10 +368,76 @@ function GlobalStyles({ theme }) {
       .login-err { font-size: 13px; color: #dc2626; text-align: center; margin-top: 10px; }
       .login-hint { font-size: 12px; color: ${dark ? "#6b7280" : "#9ca3af"}; text-align: center; margin-top: 16px; }
       .count-badge { background: #4f46e5; color: #fff; border-radius: 12px; font-size: 12px; padding: 1px 7px; margin-left: 4px; }
-      @media (max-width: 640px) {
+      /* ── Tablet (max 768px) ── */
+      @media (max-width: 768px) {
+        .navbar { padding: 0 16px; height: 56px; }
+        .nav-username { display: none; }
+        .main { padding: 16px 12px; }
+        .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 16px; }
+        .stat-card { padding: 12px 14px; }
+        .stat-value { font-size: 22px; }
+        .toolbar { padding: 10px 12px; gap: 8px; }
+        .search-wrap { min-width: 100%; order: -1; }
+        .select { flex: 1; }
+        .btn-add-full { width: 100%; justify-content: center; }
+        /* Hide less-important table columns on tablet */
+        td:nth-child(4), th:nth-child(4) { display: none; }
+        .modal { padding: 20px; }
+      }
+
+      /* ── Mobile (max 480px) ── */
+      @media (max-width: 480px) {
+        .navbar { height: 52px; }
+        .logo { font-size: 16px; }
+        .stat-grid { grid-template-columns: repeat(2, 1fr); gap: 8px; }
+        .stat-value { font-size: 20px; }
+        .stat-label { font-size: 11px; }
+
+        /* Switch table to card layout */
+        .table-wrap { border-radius: 12px; overflow: hidden; }
+        table, thead, tbody, tr, td, th { display: block; width: 100%; }
+        thead { display: none; }
+        tbody tr {
+          border: 1px solid transparent;
+          border-bottom: 1px solid rgba(107,114,128,0.15) !important;
+          padding: 14px 14px 10px;
+          position: relative;
+        }
+        tbody tr:last-child { border-bottom: none !important; }
+        td { padding: 3px 0; border: none; font-size: 13px; }
+        /* Employee name cell — larger */
+        td:nth-child(1) { padding-bottom: 8px; }
+        td:nth-child(1) > div { gap: 10px; }
+        /* Department */
+        td:nth-child(2)::before { content: "Dept: "; font-size: 11px; color: #6b7280; font-weight: 500; }
+        /* Role */
+        td:nth-child(3)::before { content: "Role: "; font-size: 11px; color: #6b7280; font-weight: 500; }
+        /* Email — hidden on mobile, shown in name cell via phone */
+        td:nth-child(4) { display: none; }
+        /* Status */
+        td:nth-child(5) { display: inline-block; margin-top: 4px; }
+        /* Actions — right-aligned at bottom */
+        td:nth-child(6) { margin-top: 10px; }
+        td:nth-child(6) .actions { justify-content: flex-end; }
+
+        /* Form grid single column */
         .form-grid { grid-template-columns: 1fr; }
-        td:nth-child(4), th:nth-child(4),
-        td:nth-child(5), th:nth-child(5) { display: none; }
+
+        /* Modal full-screen on mobile */
+        .modal-overlay { padding: 0; align-items: flex-end; }
+        .modal {
+          border-radius: 20px 20px 0 0;
+          max-height: 92vh;
+          padding: 20px 16px 28px;
+        }
+
+        /* Toolbar stack */
+        .toolbar { flex-direction: column; align-items: stretch; }
+        .select { width: 100%; }
+        .btn-add-full { width: 100%; justify-content: center; }
+
+        /* Login card padding */
+        .login-card { padding: 28px 20px; }
       }
     `}</style>
   );
@@ -554,9 +648,7 @@ function Dashboard({ user, onLogout }) {
       <nav className="navbar" ref={headerRef} style={{ opacity: 0, transition: "opacity 0.3s" }}>
         <div className="logo">👥 EmpDesk</div>
         <div className="nav-actions">
-          <span style={{ fontSize: 13, color: theme === "dark" ? "#6b7280" : "#6b7280" }}>
-            {user.name}
-          </span>
+          <span className="nav-username" style={{ fontSize: 13, color: theme === "dark" ? "#6b7280" : "#6b7280" }}>{user.name}</span>
           <button className="theme-btn" onClick={toggleTheme} title="Toggle theme">
             {theme === "dark" ? "☀️" : "🌙"}
           </button>
@@ -587,13 +679,13 @@ function Dashboard({ user, onLogout }) {
             <input className="input" placeholder="Search by name, email, role…"
               value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <select className="select" value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
+          <select className="select" style={{flex:"1",minWidth:120}} value={filterDept} onChange={(e) => setFilterDept(e.target.value)}>
             {departments.map((d) => <option key={d}>{d}</option>)}
           </select>
-          <select className="select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+          <select className="select" style={{flex:"1",minWidth:100}} value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
             {["All", "Active", "Inactive"].map((s) => <option key={s}>{s}</option>)}
           </select>
-          <button className="btn btn-primary" onClick={handleAddNew}>+ Add employee</button>
+          <button className="btn btn-primary btn-add-full" onClick={handleAddNew}>+ Add employee</button>
         </div>
 
         {/* Table */}
@@ -603,6 +695,7 @@ function Dashboard({ user, onLogout }) {
           <div className="empty"><div className="empty-icon">⚠️</div><div>{state.error}</div></div>
         ) : (
           <div className="table-wrap">
+            <div style={{overflowX:"auto"}}>
             <table>
               <thead>
                 <tr>
@@ -652,6 +745,7 @@ function Dashboard({ user, onLogout }) {
                 ))}
               </tbody>
             </table>
+            </div>
             <div style={{ padding: "12px 16px", fontSize: 13, color: "#6b7280", borderTop: `1px solid ${theme === "dark" ? "#2e3347" : "#f3f4f6"}` }}>
               Showing {filtered.length} of {state.employees.length} employees
             </div>
